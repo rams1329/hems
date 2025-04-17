@@ -8,10 +8,13 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 /** This class represents the REST API controller for departments. */
 @RestController
@@ -23,6 +26,8 @@ public class DepartmentController {
   /** The department service. */
   @Autowired private DepartmentService departmentService;
 
+  private static final Logger logger = LoggerFactory.getLogger(DepartmentController.class);
+
   /**
    * Get all departments API.
    *
@@ -31,6 +36,7 @@ public class DepartmentController {
   @Operation(summary = "Get all departments", description = "Retrieve a list of all departments")
   @GetMapping
   public List<Department> getAllDepartments() {
+    logger.info("Fetching all departments");
     return departmentService.getAllDepartments();
   }
 
@@ -51,12 +57,19 @@ public class DepartmentController {
   @GetMapping("/{id}")
   public ResponseEntity<Department> getDepartmentById(
       @Parameter(description = "ID of the department to be retrieved") @PathVariable Long id) {
-    Department department =
-        departmentService
-            .getDepartmentById(id)
-            .orElseThrow(
-                () -> new ResourceNotFoundException("Department not found with id: " + id));
-    return ResponseEntity.ok(department);
+    logger.info("Fetching department with id: {}", id);
+    try {
+      Department department =
+          departmentService
+              .getDepartmentById(id)
+              .orElseThrow(
+                  () -> new ResourceNotFoundException("Department not found with id: " + id));
+      logger.info("Department found: {} (id: {})", department.getName(), department.getId());
+      return ResponseEntity.ok(department);
+    } catch (Exception e) {
+      logger.error("Error fetching department with id {}: {}", id, e.getMessage(), e);
+      throw e;
+    }
   }
 
   /**
@@ -69,7 +82,16 @@ public class DepartmentController {
   @ApiResponse(responseCode = "201", description = "Department created successfully")
   @PostMapping
   public Department createDepartment(@RequestBody Department department) {
-    return departmentService.saveDepartment(department);
+    String username = SecurityContextHolder.getContext().getAuthentication() != null ? SecurityContextHolder.getContext().getAuthentication().getName() : "anonymous";
+    logger.info("User {} is creating department: {}", username, department.getName());
+    try {
+      Department saved = departmentService.saveDepartment(department);
+      logger.info("User {} created department with id: {}", username, saved.getId());
+      return saved;
+    } catch (Exception e) {
+      logger.error("User {} error creating department: {}", username, e.getMessage(), e);
+      throw e;
+    }
   }
 
   /**
@@ -91,16 +113,24 @@ public class DepartmentController {
   public ResponseEntity<Department> updateDepartment(
       @Parameter(description = "ID of the department to be updated") @PathVariable Long id,
       @RequestBody Department departmentDetails) {
-    Department department =
-        departmentService
-            .getDepartmentById(id)
-            .orElseThrow(
-                () -> new ResourceNotFoundException("Department not found with id: " + id));
+    String username = SecurityContextHolder.getContext().getAuthentication() != null ? SecurityContextHolder.getContext().getAuthentication().getName() : "anonymous";
+    logger.info("User {} is updating department with id: {}", username, id);
+    try {
+      Department department =
+          departmentService
+              .getDepartmentById(id)
+              .orElseThrow(
+                  () -> new ResourceNotFoundException("Department not found with id: " + id));
 
-    department.setName(departmentDetails.getName());
+      department.setName(departmentDetails.getName());
 
-    Department updatedDepartment = departmentService.saveDepartment(department);
-    return ResponseEntity.ok(updatedDepartment);
+      Department updatedDepartment = departmentService.saveDepartment(department);
+      logger.info("User {} updated department with id: {}", username, updatedDepartment.getId());
+      return ResponseEntity.ok(updatedDepartment);
+    } catch (Exception e) {
+      logger.error("User {} error updating department with id {}: {}", username, id, e.getMessage(), e);
+      throw e;
+    }
   }
 
   /**
@@ -118,13 +148,21 @@ public class DepartmentController {
   @DeleteMapping("/{id}")
   public ResponseEntity<Void> deleteDepartment(
       @Parameter(description = "ID of the department to be deleted") @PathVariable Long id) {
-    Department department =
-        departmentService
-            .getDepartmentById(id)
-            .orElseThrow(
-                () -> new ResourceNotFoundException("Department not found with id: " + id));
+    String username = SecurityContextHolder.getContext().getAuthentication() != null ? SecurityContextHolder.getContext().getAuthentication().getName() : "anonymous";
+    logger.info("User {} is deleting department with id: {}", username, id);
+    try {
+      Department department =
+          departmentService
+              .getDepartmentById(id)
+              .orElseThrow(
+                  () -> new ResourceNotFoundException("Department not found with id: " + id));
 
-    departmentService.deleteDepartment(id);
-    return ResponseEntity.noContent().build();
+      departmentService.deleteDepartment(id);
+      logger.info("User {} deleted department with id: {}", username, id);
+      return ResponseEntity.noContent().build();
+    } catch (Exception e) {
+      logger.error("User {} error deleting department with id {}: {}", username, id, e.getMessage(), e);
+      throw e;
+    }
   }
 }

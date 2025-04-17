@@ -39,4 +39,7 @@ public class Employee {
 
   /** The age of the employee. */
   private int age;
+
+  @Version
+  private Long version;
 }

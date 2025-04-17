@@ -4,6 +4,8 @@ import com.example.employeemanagement.exception.ResourceNotFoundException;
 import com.example.employeemanagement.model.Employee;
 import com.example.employeemanagement.service.EmployeeService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,6 +14,15 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.stream.Collectors;
+import org.springframework.security.core.context.SecurityContextHolder;
+import com.example.employeemanagement.service.DepartmentService;
+import com.example.employeemanagement.model.Department;
 
 /** This class represents the REST API controller for employees. */
 @RestController
@@ -22,6 +33,11 @@ public class EmployeeController {
 
   /** The employee service. */
   @Autowired private EmployeeService employeeService;
+
+  /** The department service. */
+  @Autowired private DepartmentService departmentService;
+
+  private static final Logger logger = LoggerFactory.getLogger(EmployeeController.class);
 
   /**
    * Get all employees API.
@@ -65,8 +81,24 @@ public class EmployeeController {
    */
   @Operation(summary = "Create a new employee", description = "Create a new employee record")
   @PostMapping
-  public Employee createEmployee(@RequestBody Employee employee) {
-    return employeeService.saveEmployee(employee);
+  public ResponseEntity<?> createEmployee(@RequestBody Employee employee) {
+    String username = SecurityContextHolder.getContext().getAuthentication() != null ? SecurityContextHolder.getContext().getAuthentication().getName() : "anonymous";
+    if (employee.getDepartment() == null || employee.getDepartment().getId() == null) {
+      logger.error("User {} tried to create employee without department", username);
+      return ResponseEntity.badRequest().body("Department is required");
+    }
+    Department department = departmentService.getDepartmentById(employee.getDepartment().getId())
+      .orElseThrow(() -> new ResourceNotFoundException("Department not found with id: " + employee.getDepartment().getId()));
+    employee.setDepartment(department);
+    logger.info("User {} is creating employee: {} {} (email: {})", username, employee.getFirstName(), employee.getLastName(), employee.getEmail());
+    try {
+      Employee saved = employeeService.saveEmployee(employee);
+      logger.info("User {} created employee with id: {}", username, saved.getId());
+      return ResponseEntity.ok(saved);
+    } catch (Exception e) {
+      logger.error("User {} error creating employee: {}", username, e.getMessage(), e);
+      return ResponseEntity.status(500).body("Error creating employee: " + e.getMessage());
+    }
   }
 
   /**
@@ -85,21 +117,39 @@ public class EmployeeController {
         @ApiResponse(responseCode = "404", description = "Employee not found")
       })
   @PutMapping("/{id}")
-  public ResponseEntity<Employee> updateEmployee(
+  public ResponseEntity<?> updateEmployee(
       @PathVariable Long id, @RequestBody Employee employeeDetails) {
-    Employee employee =
-        employeeService
-            .getEmployeeById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + id));
+    String username = SecurityContextHolder.getContext().getAuthentication() != null ? SecurityContextHolder.getContext().getAuthentication().getName() : "anonymous";
+    logger.info("User {} is updating employee with id: {}", username, id);
+    try {
+      Employee employee =
+          employeeService
+              .getEmployeeById(id)
+              .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + id));
 
-    employee.setFirstName(employeeDetails.getFirstName());
-    employee.setLastName(employeeDetails.getLastName());
-    employee.setEmail(employeeDetails.getEmail());
-    employee.setDepartment(employeeDetails.getDepartment());
-    employee.setAge(employeeDetails.getAge());
+      if (employeeDetails.getDepartment() == null || employeeDetails.getDepartment().getId() == null) {
+        logger.error("User {} tried to update employee without department", username);
+        return ResponseEntity.badRequest().body("Department is required");
+      }
+      Department department = departmentService.getDepartmentById(employeeDetails.getDepartment().getId())
+        .orElseThrow(() -> new ResourceNotFoundException("Department not found with id: " + employeeDetails.getDepartment().getId()));
+      employee.setDepartment(department);
 
-    Employee updatedEmployee = employeeService.saveEmployee(employee);
-    return ResponseEntity.ok(updatedEmployee);
+      employee.setFirstName(employeeDetails.getFirstName());
+      employee.setLastName(employeeDetails.getLastName());
+      employee.setEmail(employeeDetails.getEmail());
+      employee.setAge(employeeDetails.getAge());
+
+      Employee updatedEmployee = employeeService.saveEmployee(employee);
+      logger.info("User {} updated employee with id: {}", username, updatedEmployee.getId());
+      return ResponseEntity.ok(updatedEmployee);
+    } catch (ResourceNotFoundException e) {
+      logger.error("User {} error updating employee with id {}: {}", username, id, e.getMessage(), e);
+      return ResponseEntity.status(404).body(e.getMessage());
+    } catch (Exception e) {
+      logger.error("User {} error updating employee with id {}: {}", username, id, e.getMessage(), e);
+      return ResponseEntity.status(500).body("Error updating employee: " + e.getMessage());
+    }
   }
 
   /**
@@ -116,12 +166,39 @@ public class EmployeeController {
       })
   @DeleteMapping("/{id}")
   public ResponseEntity<Void> deleteEmployee(@PathVariable Long id) {
-    Employee employee =
-        employeeService
-            .getEmployeeById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + id));
+    String username = SecurityContextHolder.getContext().getAuthentication() != null ? SecurityContextHolder.getContext().getAuthentication().getName() : "anonymous";
+    logger.info("User {} is deleting employee with id: {}", username, id);
+    try {
+      Employee employee =
+          employeeService
+              .getEmployeeById(id)
+              .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + id));
 
-    employeeService.deleteEmployee(id);
-    return ResponseEntity.noContent().build();
+      employeeService.deleteEmployee(id);
+      logger.info("User {} deleted employee with id: {}", username, id);
+      return ResponseEntity.noContent().build();
+    } catch (Exception e) {
+      logger.error("User {} error deleting employee with id {}: {}", username, id, e.getMessage(), e);
+      throw e;
+    }
+  }
+
+  @GetMapping("/logs")
+  public ResponseEntity<String> getLogs(@RequestParam(defaultValue = "200") int lines) {
+    try {
+      // Adjust the log file path as needed
+      String logFilePath = "logs/application.log";
+      File logFile = new File(logFilePath);
+      if (!logFile.exists()) {
+        return ResponseEntity.ok("Log file not found.");
+      }
+      List<String> allLines = Files.readAllLines(Paths.get(logFilePath));
+      int from = Math.max(0, allLines.size() - lines);
+      String result = allLines.subList(from, allLines.size()).stream().collect(Collectors.joining("\n"));
+      return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(result);
+    } catch (Exception e) {
+      logger.error("Error reading logs: {}", e.getMessage(), e);
+      return ResponseEntity.status(500).body("Error reading logs: " + e.getMessage());
+    }
   }
 }

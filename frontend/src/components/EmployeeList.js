@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getAllEmployees, deleteEmployee } from '../services/employeeService';
+import { getAllEmployees, deleteEmployee, addEmployee } from '../services/employeeService';
+import { getAllDepartments } from '../services/departmentService';
 import {
   Table,
   TableBody,
@@ -17,6 +18,9 @@ import {
   Snackbar,
   Alert,
 } from '@mui/material';
+import Papa from 'papaparse';
+import DownloadIcon from '@mui/icons-material/Download';
+import UploadIcon from '@mui/icons-material/Upload';
 
 const EmployeeList = () => {
   const navigate = useNavigate();
@@ -28,6 +32,14 @@ const EmployeeList = () => {
   const [deletingEmployeeId, setDeletingEmployeeId] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showSnackbar, setShowSnackbar] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importError, setImportError] = useState('');
+  const [selected, setSelected] = useState([]);
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState(0);
+  const [deleteError, setDeleteError] = useState('');
+  const [importWarnings, setImportWarnings] = useState([]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -86,6 +98,124 @@ const EmployeeList = () => {
       employee.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleExportCSV = () => {
+    const csv = Papa.unparse(
+      employees.map(e => ({
+        firstName: e.firstName,
+        lastName: e.lastName,
+        email: e.email,
+        age: e.age,
+        departmentId: e.department?.id || '',
+      }))
+    );
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'employees.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportCSV = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setImporting(true);
+    setImportProgress(0);
+    setImportError('');
+    setImportWarnings([]);
+    try {
+      const departments = await getAllDepartments();
+      const validDeptIds = new Set(departments.map(d => String(d.id)));
+      const text = await file.text();
+      Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: async (results) => {
+          const rows = results.data;
+          let imported = 0;
+          let warnings = [];
+          for (const [i, row] of rows.entries()) {
+            const deptId = String(row.departmentId).trim();
+            if (!deptId || !validDeptIds.has(deptId)) {
+              warnings.push(`Row ${i + 2}: Invalid or missing departmentId (${row.departmentId})`);
+              continue;
+            }
+            try {
+              const employee = {
+                firstName: row.firstName,
+                lastName: row.lastName,
+                email: row.email,
+                age: Number(row.age),
+                department: { id: deptId },
+              };
+              await addEmployee(employee);
+              imported++;
+              setImportProgress(Math.round((imported / rows.length) * 100));
+            } catch (err) {
+              warnings.push(`Row ${i + 2}: Error importing employee (${row.email})`);
+            }
+          }
+          setImporting(false);
+          setImportProgress(100);
+          setImportWarnings(warnings);
+          const data = await getAllEmployees();
+          setEmployees(data);
+        },
+        error: (err) => {
+          setImportError('Failed to parse CSV.');
+          setImporting(false);
+        },
+      });
+    } catch (err) {
+      setImportError('Failed to read file.');
+      setImporting(false);
+    }
+  };
+
+  // Get IDs of employees on the current page
+  const currentPageEmployeeIds = filteredEmployees.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map(e => e.id);
+
+  const handleSelectAll = (event) => {
+    if (event.target.checked) {
+      // Add all current page employee IDs to selected (avoid duplicates)
+      setSelected(prev => Array.from(new Set([...prev, ...currentPageEmployeeIds])));
+    } else {
+      // Remove all current page employee IDs from selected
+      setSelected(prev => prev.filter(id => !currentPageEmployeeIds.includes(id)));
+    }
+  };
+
+  const handleSelectOne = (id) => (event) => {
+    if (event.target.checked) {
+      setSelected(prev => [...prev, id]);
+    } else {
+      setSelected(prev => prev.filter(sid => sid !== id));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    setDeletingSelected(true);
+    setDeleteProgress(0);
+    setDeleteError('');
+    let deleted = 0;
+    for (const id of selected) {
+      try {
+        await deleteEmployee(id);
+        deleted++;
+        setDeleteProgress(Math.round((deleted / selected.length) * 100));
+      } catch (err) {
+        setDeleteError('Error deleting some employees.');
+      }
+    }
+    setDeletingSelected(false);
+    setSelected([]);
+    // Refresh employees list
+    const data = await getAllEmployees();
+    setEmployees(data);
+  };
+
   if (loading) {
     return (
       <Box
@@ -138,6 +268,60 @@ const EmployeeList = () => {
       </Snackbar>
 
       <h2>Employees</h2>
+      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<DownloadIcon />}
+          onClick={handleExportCSV}
+          sx={{ mb: 1 }}
+        >
+          Export CSV
+        </Button>
+        <Button
+          variant="contained"
+          color="secondary"
+          component="label"
+          startIcon={<UploadIcon />}
+          sx={{ mb: 1 }}
+          disabled={importing}
+        >
+          Import CSV
+          <input type="file" accept=".csv" hidden onChange={handleImportCSV} />
+        </Button>
+        {importing && (
+          <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
+            <CircularProgress size={24} sx={{ mr: 1 }} />
+            <span>Importing... {importProgress}%</span>
+          </Box>
+        )}
+        {importError && (
+          <Alert severity="error" sx={{ ml: 2 }}>{importError}</Alert>
+        )}
+        {importWarnings.length > 0 && (
+          <Alert severity="warning" sx={{ ml: 2, whiteSpace: 'pre-line' }}>
+            Some rows were skipped or failed to import:\n{importWarnings.join('\n')}
+          </Alert>
+        )}
+        <Button
+          variant="contained"
+          color="error"
+          onClick={handleDeleteSelected}
+          disabled={deletingSelected || selected.length === 0}
+          sx={{ mb: 1 }}
+        >
+          Delete Selected
+        </Button>
+        {deletingSelected && (
+          <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
+            <CircularProgress size={24} sx={{ mr: 1 }} />
+            <span>Deleting... {deleteProgress}%</span>
+          </Box>
+        )}
+        {deleteError && (
+          <Alert severity="error" sx={{ ml: 2 }}>{deleteError}</Alert>
+        )}
+      </Box>
       <Button variant="contained" component={Link} to="/add-employee" sx={{ marginBottom: '1rem' }}>
         Add Employee
       </Button>
@@ -152,6 +336,15 @@ const EmployeeList = () => {
         <Table>
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <input
+                  type="checkbox"
+                  checked={currentPageEmployeeIds.length > 0 && currentPageEmployeeIds.every(id => selected.includes(id))}
+                  {...(currentPageEmployeeIds.some(id => selected.includes(id)) && !currentPageEmployeeIds.every(id => selected.includes(id)) ? { indeterminate: true } : {})}
+                  onChange={handleSelectAll}
+                  disabled={deletingSelected}
+                />
+              </TableCell>
               <TableCell>First Name</TableCell>
               <TableCell>Last Name</TableCell>
               <TableCell>Email</TableCell>
@@ -161,6 +354,14 @@ const EmployeeList = () => {
           <TableBody>
             {filteredEmployees.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map(employee => (
               <TableRow key={employee.id}>
+                <TableCell padding="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(employee.id)}
+                    onChange={handleSelectOne(employee.id)}
+                    disabled={deletingSelected}
+                  />
+                </TableCell>
                 <TableCell>{employee.firstName}</TableCell>
                 <TableCell>{employee.lastName}</TableCell>
                 <TableCell>{employee.email}</TableCell>

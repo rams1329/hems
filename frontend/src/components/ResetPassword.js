@@ -12,6 +12,9 @@ const ResetPassword = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [checkingMfa, setCheckingMfa] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -24,6 +27,22 @@ const ResetPassword = () => {
     }
   }, [location]);
 
+  useEffect(() => {
+    if (username) {
+      setCheckingMfa(true);
+      fetch(`http://localhost:8080/mfa/status/${username}`)
+        .then(res => res.json())
+        .then(data => {
+          setMfaEnabled(!!data.mfaEnabled);
+          setCheckingMfa(false);
+        })
+        .catch(() => {
+          setMfaEnabled(false);
+          setCheckingMfa(false);
+        });
+    }
+  }, [username]);
+
   const handleSubmit = async e => {
     e.preventDefault();
     setLoading(true);
@@ -35,12 +54,17 @@ const ResetPassword = () => {
       setError('Passwords do not match.');
       return;
     }
+    if (mfaEnabled && !mfaCode) {
+      setLoading(false);
+      setError('MFA code is required.');
+      return;
+    }
 
     try {
-      const response = await fetch('https://employee-management-app-gdm5.onrender.com/reset-password', {
+      const response = await fetch('http://localhost:8080/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, newPassword }),
+        body: JSON.stringify({ username, newPassword, code: mfaCode }),
       });
 
       setLoading(false);
@@ -51,8 +75,8 @@ const ResetPassword = () => {
           navigate('/login');
         }, 2000); // Redirect to login page after success
       } else {
-        const errorData = await response.json();
-        setError(errorData.message || 'Error resetting password.');
+        const errorData = await response.text();
+        setError(errorData || 'Error resetting password.');
       }
     } catch (err) {
       setLoading(false);
@@ -111,6 +135,21 @@ const ResetPassword = () => {
                 ),
               }}
             />
+            {checkingMfa && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+                <CircularProgress size={20} />
+                <Typography sx={{ ml: 1 }}>Checking MFA...</Typography>
+              </Box>
+            )}
+            {mfaEnabled && !checkingMfa && (
+              <TextField
+                fullWidth
+                label="MFA Code"
+                value={mfaCode}
+                onChange={e => setMfaCode(e.target.value)}
+                sx={{ marginBottom: '1rem' }}
+              />
+            )}
             {loading ? (
               <Box sx={{ display: 'flex', justifyContent: 'center' }}>
                 <CircularProgress />

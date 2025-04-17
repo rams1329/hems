@@ -3,6 +3,8 @@ import { AppBar, Toolbar, Typography, Button, Box, IconButton, Drawer, List, Lis
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MenuIcon from '@mui/icons-material/Menu';
 import useMediaQuery from '@mui/material/useMediaQuery';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import { getProfileImage } from '../services/profileService';
 
 const Navbar = () => {
   const location = useLocation();
@@ -10,6 +12,7 @@ const Navbar = () => {
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [profileImage, setProfileImage] = useState(null);
 
   // Check if screen width is below 1000px
   const isMobile = useMediaQuery('(max-width:1000px)');
@@ -28,9 +31,26 @@ const Navbar = () => {
 
     checkLoginStatus();
     const interval = setInterval(checkLoginStatus, 2000);
-
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch profile image whenever isLoggedIn changes
+  useEffect(() => {
+    const fetchProfileImage = async () => {
+      const username = localStorage.getItem('EMSusername');
+      if (isLoggedIn && username) {
+        try {
+          const img = await getProfileImage(username);
+          setProfileImage(img);
+        } catch {
+          setProfileImage(null);
+        }
+      } else {
+        setProfileImage(null);
+      }
+    };
+    fetchProfileImage();
+  }, [isLoggedIn]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -56,16 +76,23 @@ const Navbar = () => {
         <ListItem button component={Link} to="/profile" selected={isActive('/profile')} onClick={handleDrawerToggle}>
           <ListItemText primary="Profile" sx={{ color: isActive('/profile') ? '#ff9800' : 'white' }} />
         </ListItem>
-        <ListItem button component={Link} to="/login" selected={isActive('/login')} onClick={handleDrawerToggle}>
-          <ListItemText
-            primary={isLoggedIn ? 'Logout' : 'Login'}
-            sx={{ color: isLoggedIn ? 'red' : isActive('/login') ? '#ff9800' : 'white' }}
-            onClick={isLoggedIn ? handleLogout : null}
-          />
+        <ListItem button component={Link} to="/logs" selected={isActive('/logs')} onClick={handleDrawerToggle}>
+          <ListItemText primary="Logs" sx={{ color: isActive('/logs') ? '#ff9800' : 'white' }} />
         </ListItem>
-        <ListItem button component={Link} to="/register" selected={isActive('/register')} onClick={handleDrawerToggle}>
-          <ListItemText primary="Register" sx={{ color: isActive('/register') ? '#ff9800' : 'white' }} />
-        </ListItem>
+        {isLoggedIn ? (
+          <ListItem button onClick={() => { handleLogout(); handleDrawerToggle(); }}>
+            <ListItemText primary="Logout" sx={{ color: 'red' }} />
+          </ListItem>
+        ) : (
+          <>
+            <ListItem button component={Link} to="/login" selected={isActive('/login')} onClick={handleDrawerToggle}>
+              <ListItemText primary="Login" sx={{ color: isActive('/login') ? '#ff9800' : 'white' }} />
+            </ListItem>
+            <ListItem button component={Link} to="/register" selected={isActive('/register')} onClick={handleDrawerToggle}>
+              <ListItemText primary="Register" sx={{ color: isActive('/register') ? '#ff9800' : 'white' }} />
+            </ListItem>
+          </>
+        )}
       </List>
     </Box>
   );
@@ -96,7 +123,7 @@ const Navbar = () => {
             </IconButton>
           ) : (
             // Render full menu for desktop view
-            <Box sx={{ display: 'flex', gap: '1rem' }}>
+            <Box sx={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
               <Button
                 color={isActive('/') ? 'primary' : 'inherit'}
                 component={Link}
@@ -146,16 +173,16 @@ const Navbar = () => {
                 Departments
               </Button>
               <Button
-                color={isActive('/profile') ? 'primary' : 'inherit'}
+                color={isActive('/logs') ? 'primary' : 'inherit'}
                 component={Link}
-                to="/profile"
+                to="/logs"
                 sx={{
                   fontSize: '1rem',
                   fontWeight: 500,
-                  color: isActive('/profile') ? '#ff9800' : 'inherit',
+                  color: isActive('/logs') ? '#ff9800' : 'inherit',
                 }}
               >
-                Profile
+                Logs
               </Button>
               {/* Conditional Login/Logout Button */}
               {isLoggedIn ? (
@@ -164,37 +191,58 @@ const Navbar = () => {
                   sx={{
                     fontSize: '1rem',
                     fontWeight: 500,
-                    color: 'red', // Make logout button red
+                    color: 'red',
                   }}
                 >
                   Logout
                 </Button>
               ) : (
-                <Button
-                  color={isActive('/login') ? 'primary' : 'inherit'}
-                  component={Link}
-                  to="/login"
-                  sx={{
-                    fontSize: '1rem',
-                    fontWeight: 500,
-                    color: isActive('/login') ? '#ff9800' : 'inherit',
-                  }}
-                >
-                  Login
-                </Button>
+                <>
+                  <Button
+                    color={isActive('/login') ? 'primary' : 'inherit'}
+                    component={Link}
+                    to="/login"
+                    sx={{
+                      fontSize: '1rem',
+                      fontWeight: 500,
+                      color: isActive('/login') ? '#ff9800' : 'inherit',
+                    }}
+                  >
+                    Login
+                  </Button>
+                  <Button
+                    color={isActive('/register') ? 'primary' : 'inherit'}
+                    component={Link}
+                    to="/register"
+                    sx={{
+                      fontSize: '1rem',
+                      fontWeight: 500,
+                      color: isActive('/register') ? '#ff9800' : 'inherit',
+                    }}
+                  >
+                    Register
+                  </Button>
+                </>
               )}
-              <Button
-                color={isActive('/register') ? 'primary' : 'inherit'}
-                component={Link}
-                to="/register"
-                sx={{
-                  fontSize: '1rem',
-                  fontWeight: 500,
-                  color: isActive('/register') ? '#ff9800' : 'inherit',
-                }}
-              >
-                Register
-              </Button>
+              {/* User icon with profile photo in the far right corner */}
+              {isLoggedIn && (
+                <IconButton
+                  component={Link}
+                  to="/profile"
+                  sx={{ ml: 2, p: 0, borderRadius: '50%', border: '2px solid #fff', width: 40, height: 40, overflow: 'hidden', background: '#fff' }}
+                  title="Profile"
+                >
+                  {profileImage ? (
+                    <img
+                      src={profileImage}
+                      alt="Profile"
+                      style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <AccountCircleIcon sx={{ width: 36, height: 36, color: '#3f51b5' }} />
+                  )}
+                </IconButton>
+              )}
             </Box>
           )}
         </Toolbar>

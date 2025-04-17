@@ -20,6 +20,15 @@ public class User {
   @Column(nullable = false)
   private String password;
 
+  @Column(name = "mfa_secret")
+  private String mfaSecret;
+
+  @Column(name = "mfa_enabled")
+  private boolean mfaEnabled = false;
+
+  @Column(name = "profile_image", columnDefinition = "TEXT")
+  private String profileImage;
+
   // Getters and Setters
 
   /**
@@ -74,5 +83,29 @@ public class User {
    */
   public void setPassword(String password) {
     this.password = password;
+  }
+
+  public String getMfaSecret() {
+    return mfaSecret;
+  }
+
+  public void setMfaSecret(String mfaSecret) {
+    this.mfaSecret = mfaSecret;
+  }
+
+  public boolean isMfaEnabled() {
+    return mfaEnabled;
+  }
+
+  public void setMfaEnabled(boolean mfaEnabled) {
+    this.mfaEnabled = mfaEnabled;
+  }
+
+  public String getProfileImage() {
+    return profileImage;
+  }
+
+  public void setProfileImage(String profileImage) {
+    this.profileImage = profileImage;
   }
 }

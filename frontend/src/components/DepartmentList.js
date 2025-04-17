@@ -28,6 +28,10 @@ const DepartmentList = () => {
   const [deletingDepartmentId, setDeletingDepartmentId] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showSnackbar, setShowSnackbar] = useState(false);
+  const [selected, setSelected] = useState([]);
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState(0);
+  const [deleteError, setDeleteError] = useState('');
 
   // Check login status
   useEffect(() => {
@@ -83,6 +87,43 @@ const DepartmentList = () => {
 
   const filteredDepartments = departments.filter(department => department.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
+  const handleSelectAll = (event) => {
+    if (event.target.checked) {
+      setSelected(filteredDepartments.map(d => d.id));
+    } else {
+      setSelected([]);
+    }
+  };
+
+  const handleSelectOne = (id) => (event) => {
+    if (event.target.checked) {
+      setSelected(prev => [...prev, id]);
+    } else {
+      setSelected(prev => prev.filter(sid => sid !== id));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    setDeletingSelected(true);
+    setDeleteProgress(0);
+    setDeleteError('');
+    let deleted = 0;
+    for (const id of selected) {
+      try {
+        await deleteDepartment(id);
+        deleted++;
+        setDeleteProgress(Math.round((deleted / selected.length) * 100));
+      } catch (err) {
+        setDeleteError('Error deleting some departments.');
+      }
+    }
+    setDeletingSelected(false);
+    setSelected([]);
+    // Refresh departments list
+    const data = await getAllDepartments();
+    setDepartments(data);
+  };
+
   if (loading) {
     return (
       <Box
@@ -135,6 +176,26 @@ const DepartmentList = () => {
       </Snackbar>
 
       <h2>Departments</h2>
+      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+        <Button
+          variant="contained"
+          color="error"
+          onClick={handleDeleteSelected}
+          disabled={deletingSelected || selected.length === 0}
+          sx={{ mb: 1 }}
+        >
+          Delete Selected
+        </Button>
+        {deletingSelected && (
+          <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
+            <CircularProgress size={24} sx={{ mr: 1 }} />
+            <span>Deleting... {deleteProgress}%</span>
+          </Box>
+        )}
+        {deleteError && (
+          <Alert severity="error" sx={{ ml: 2 }}>{deleteError}</Alert>
+        )}
+      </Box>
       <Button variant="contained" component={Link} to="/add-department" sx={{ marginBottom: '1rem' }}>
         Add Department
       </Button>
@@ -149,6 +210,15 @@ const DepartmentList = () => {
         <Table>
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <input
+                  type="checkbox"
+                  checked={selected.length > 0 && selected.length === filteredDepartments.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).length}
+                  indeterminate={selected.length > 0 && selected.length < filteredDepartments.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).length}
+                  onChange={handleSelectAll}
+                  disabled={deletingSelected}
+                />
+              </TableCell>
               <TableCell>Name</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -156,6 +226,14 @@ const DepartmentList = () => {
           <TableBody>
             {filteredDepartments.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map(department => (
               <TableRow key={department.id}>
+                <TableCell padding="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(department.id)}
+                    onChange={handleSelectOne(department.id)}
+                    disabled={deletingSelected}
+                  />
+                </TableCell>
                 <TableCell>{department.name}</TableCell>
                 <TableCell>
                   <Button
@@ -172,7 +250,7 @@ const DepartmentList = () => {
                     color="secondary"
                     onClick={() => handleDelete(department.id)}
                     sx={{ marginBottom: '0.25rem' }}
-                    disabled={deletingDepartmentId === department.id}
+                    disabled={deletingDepartmentId === department.id || deletingSelected}
                     startIcon={deletingDepartmentId === department.id ? <CircularProgress size={20} /> : null}
                   >
                     {deletingDepartmentId === department.id ? 'Deleting...' : 'Delete'}

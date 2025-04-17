@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Typography, Button, CircularProgress, Snackbar, Alert, Link } from '@mui/material';
+import { Box, Typography, Button, CircularProgress, Snackbar, Alert, Link, TextField, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { getAllEmployees } from '../services/employeeService';
 import { getAllDepartments } from '../services/departmentService';
+import { uploadProfileImage, getProfileImage } from '../services/profileService';
 
 const Profile = ({ theme }) => {
   const navigate = useNavigate();
@@ -12,6 +13,18 @@ const Profile = ({ theme }) => {
   const [averageAge, setAverageAge] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showSnackbar, setShowSnackbar] = useState(false);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaSetupOpen, setMfaSetupOpen] = useState(false);
+  const [qrUrl, setQrUrl] = useState('');
+  const [mfaSecret, setMfaSecret] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaError, setMfaError] = useState('');
+  const [mfaSuccess, setMfaSuccess] = useState('');
+  const [disableLoading, setDisableLoading] = useState(false);
+  const [profileImage, setProfileImage] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
 
   useEffect(() => {
     const checkLoginStatus = () => {
@@ -47,6 +60,41 @@ const Profile = ({ theme }) => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    // Fetch MFA status for the user
+    const fetchMfaStatus = async () => {
+      const username = localStorage.getItem('EMSusername');
+      if (!username) return;
+      try {
+        const res = await fetch(`http://localhost:8080/mfa/status/${username}`);
+        if (res.ok) {
+          const data = await res.json();
+          setMfaEnabled(!!data.mfaEnabled);
+        } else {
+          setMfaEnabled(false);
+        }
+      } catch (e) {
+        setMfaEnabled(false);
+      }
+    };
+    fetchMfaStatus();
+  }, []);
+
+  useEffect(() => {
+    // Fetch profile image
+    const fetchProfileImage = async () => {
+      const username = localStorage.getItem('EMSusername');
+      if (!username) return;
+      try {
+        const img = await getProfileImage(username);
+        setProfileImage(img);
+      } catch (e) {
+        setProfileImage(null);
+      }
+    };
+    fetchProfileImage();
+  }, []);
+
   const handleCloseSnackbar = () => {
     setShowSnackbar(false);
     navigate('/login', { replace: true });
@@ -54,6 +102,100 @@ const Profile = ({ theme }) => {
 
   const handleLoginRedirect = () => {
     navigate('/login');
+  };
+
+  const handleOpenMfaSetup = async () => {
+    setMfaError('');
+    setMfaSuccess('');
+    setMfaCode('');
+    setQrUrl('');
+    setMfaSecret('');
+    setMfaSetupOpen(true);
+    try {
+      const username = localStorage.getItem('EMSusername');
+      const res = await fetch('http://localhost:8080/mfa/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setQrUrl(data.qrUrl);
+        setMfaSecret(data.secret);
+      } else {
+        setMfaError(data);
+      }
+    } catch (e) {
+      setMfaError('Failed to start MFA setup.');
+    }
+  };
+
+  const handleVerifyMfa = async () => {
+    setMfaError('');
+    setMfaSuccess('');
+    try {
+      const username = localStorage.getItem('EMSusername');
+      const res = await fetch('http://localhost:8080/mfa/enable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, code: mfaCode })
+      });
+      const data = await res.text();
+      if (res.ok) {
+        setMfaSuccess('MFA enabled successfully!');
+        setMfaEnabled(true);
+        setMfaSetupOpen(false);
+      } else {
+        setMfaError(data);
+      }
+    } catch (e) {
+      setMfaError('Failed to verify MFA code.');
+    }
+  };
+
+  const handleDisableMfa = async () => {
+    setDisableLoading(true);
+    setMfaError('');
+    setMfaSuccess('');
+    try {
+      const username = localStorage.getItem('EMSusername');
+      const res = await fetch('http://localhost:8080/mfa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      if (res.ok) {
+        setMfaEnabled(false);
+        setMfaSuccess('MFA disabled.');
+      } else {
+        setMfaError('Failed to disable MFA.');
+      }
+    } catch (e) {
+      setMfaError('Failed to disable MFA.');
+    }
+    setDisableLoading(false);
+  };
+
+  const handleImageChange = async (e) => {
+    setUploadError('');
+    setUploadSuccess('');
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result;
+      setUploading(true);
+      try {
+        const username = localStorage.getItem('EMSusername');
+        await uploadProfileImage(username, base64String);
+        setProfileImage(base64String);
+        setUploadSuccess('Profile image updated!');
+      } catch (err) {
+        setUploadError('Failed to upload image.');
+      }
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
   };
 
   if (!isLoggedIn) {
@@ -103,7 +245,6 @@ const Profile = ({ theme }) => {
     employeeCount,
     departmentCount,
     averageAge,
-    averageJobSatisfaction: 'High',
   };
 
   const avatarUrl = '/OIP.jpg';
@@ -150,10 +291,33 @@ const Profile = ({ theme }) => {
             overflow: 'hidden',
             margin: '0 auto 16px',
             border: '3px solid #3f51b5',
+            position: 'relative',
           }}
         >
-          <img src={avatarUrl} alt="User Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <img
+            src={profileImage || '/OIP.jpg'}
+            alt="User Avatar"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+          <input
+            type="file"
+            accept="image/*"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '100%',
+              height: '100%',
+              opacity: 0,
+              cursor: 'pointer',
+            }}
+            onChange={handleImageChange}
+            title="Upload new profile image"
+          />
         </Box>
+        {uploading && <Typography sx={{ color: 'blue', mb: 1 }}>Uploading...</Typography>}
+        {uploadError && <Typography sx={{ color: 'red', mb: 1 }}>{uploadError}</Typography>}
+        {uploadSuccess && <Typography sx={{ color: 'green', mb: 1 }}>{uploadSuccess}</Typography>}
 
         <Typography variant="h5" sx={{ mb: 2, fontWeight: 'bold' }}>
           Profile Information
@@ -175,15 +339,59 @@ const Profile = ({ theme }) => {
           <strong>Average Age:</strong> {profileData.averageAge}
         </Typography>
 
-        <Typography variant="body1" sx={{ mb: 1 }}>
-          <strong>Job Satisfaction:</strong> {profileData.averageJobSatisfaction}
-        </Typography>
-
         <div style={{ height: 20, borderBottom: '1px solid #ccc' }}></div>
 
         <Typography variant="body1" sx={{ mt: 2 }}>
           <strong>Thank you for using our platform today! 🚀</strong>
         </Typography>
+
+        {/* MFA Section */}
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="h6">Multi-Factor Authentication (MFA)</Typography>
+          {mfaEnabled ? (
+            <>
+              <Typography color="success.main" sx={{ mt: 1 }}>MFA is enabled on your account.</Typography>
+              <Button variant="outlined" color="error" sx={{ mt: 2 }} onClick={handleDisableMfa} disabled={disableLoading}>
+                {disableLoading ? 'Disabling...' : 'Disable MFA'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Typography color="warning.main" sx={{ mt: 1 }}>MFA is not enabled.</Typography>
+              <Button variant="contained" color="primary" sx={{ mt: 2 }} onClick={handleOpenMfaSetup}>
+                Setup MFA
+              </Button>
+            </>
+          )}
+          {mfaError && <Typography color="error" sx={{ mt: 1 }}>{mfaError}</Typography>}
+          {mfaSuccess && <Typography color="success.main" sx={{ mt: 1 }}>{mfaSuccess}</Typography>}
+        </Box>
+
+        {/* MFA Setup Dialog */}
+        <Dialog open={mfaSetupOpen} onClose={() => setMfaSetupOpen(false)}>
+          <DialogTitle>Setup MFA</DialogTitle>
+          <DialogContent>
+            {qrUrl && (
+              <Box sx={{ textAlign: 'center', mb: 2 }}>
+                <img src={qrUrl} alt="MFA QR Code" style={{ width: 200, height: 200 }} />
+                <Typography variant="body2" sx={{ mt: 1 }}>Scan this QR code with Google Authenticator or a compatible app.</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>Or enter this secret manually: <b>{mfaSecret}</b></Typography>
+              </Box>
+            )}
+            <TextField
+              fullWidth
+              label="Enter code from app"
+              value={mfaCode}
+              onChange={e => setMfaCode(e.target.value)}
+              sx={{ marginBottom: '1rem' }}
+            />
+            {mfaError && <Typography color="error">{mfaError}</Typography>}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setMfaSetupOpen(false)}>Cancel</Button>
+            <Button onClick={handleVerifyMfa} variant="contained">Verify & Enable</Button>
+          </DialogActions>
+        </Dialog>
 
         <Button variant="contained" color="secondary" sx={{ mt: 3 }} onClick={handleLogout}>
           Logout
